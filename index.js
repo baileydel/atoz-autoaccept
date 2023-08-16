@@ -1,12 +1,16 @@
 
 import puppeteer from 'puppeteer';
-
 import readline from 'readline';
 import fetch from 'node-fetch';
 import moment from 'moment';
+import dotenv from 'dotenv';
 
-const user = 'delkeeba';
-const password = 'Bd689984!@';
+dotenv.config();
+
+const user = process.env.USER_ID;
+const password = process.env.PASS;
+const employee_id = process.env.EMPLOYEE_ID
+
 const type = 'vto';
 const process_path = 'CYCLE_1';
 
@@ -20,7 +24,6 @@ const browser = await puppeteer.launch({
     headless: false,
 });
 
-
 let loginTimes = 0;
 
 (async () => {
@@ -31,7 +34,7 @@ let loginTimes = 0;
       const page = await browser.newPage();
 
       while (true) {
-        if (page.url().includes('https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=110969383')) {
+        if (page.url().includes(`https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=${employee_id}`)) {
             page.reload({
                 waitUntil: "domcontentloaded",
             }).then(() => {
@@ -66,7 +69,7 @@ let loginTimes = 0;
         else {
             await login(page);
 
-            await page.goto("https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=110969383", {
+            await page.goto(`https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=${employee_id}`, {
                 waitUntil: "domcontentloaded"
             }).catch((err) => console.log("error loading url", err));
         }
@@ -121,7 +124,9 @@ function delay(time) {
 }
 
 async function login() {
-    console.time("goto");
+    loginTimes++;
+    console.time(`Login #${loginTimes}`);
+    
     const page = await browser.newPage();
 
     await page.goto('https://idp.amazon.work/idp/profile/SAML2/Unsolicited/SSO?providerId=idp-us-west-2.federate.amazon.com&target=us-west-2_P230805164842851PDX9SH9GRTBJ9EN_AgR480ceuAiB9Uz1yBOvGCAw9LSGzYaNWYMMII2q6_UHB8wAKAABAAN0eG4AH1AyMzA4MDUxNjQ4NDI4NTFQRFg5U0g5R1JUQko5RU4AAQAHYXdzLWttcwBLYXJuOmF3czprbXM6dXMtd2VzdC0yOjY0MjM5NzE3MDM1MDprZXkvOGQ3ZWMwZmQtYjA4Yy00YWYyLTg5YzUtMGUyNDNiNjdhNzEzALgBAgEAeKLzKlLcRHbS-w0xD1tUSX_3KYwJqCkVLosFxUmWG1UQAfsHcTa5qHaQZP9wazsxfBQAAAB-MHwGCSqGSIb3DQEHBqBvMG0CAQAwaAYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAwgK-aHROuH7vWCIPMCARCAO7C5HgyPcXwDTMBXD9zNW7cCOkT73QFFHQtl7vzi07I8A-2QA8B6dqK5ODt2O-mAnwzT8TK4g465aARzAgAAEACm8oAy4EK3D0XvmgdWIVKQByshesJSgicg9J5DZ_2mLHWp7sdL4dLqKPg__FyW5Tn_____AAAAAQAAAAAAAAAAAAAAAQAAAFp8_WEwnsebt7HIPMuopCTXMxcXxBKyDJ7ngA_yPLopYED5e48agD5cjIamu8RYF8K2Nm_kli3n2vK86aixNoeizAYwtlIRA_gCakx28uA8RAg_2k2oGl38oBI_yqD-IW_4S9XCX65EyEs3&relying_party=atoz.web.prod.clientid', {
@@ -139,11 +144,14 @@ async function login() {
             waitUntil: "domcontentloaded"
         }).catch((err) => console.log("error loading url", err));
 
-        loginTimes++;
 
         // Send the 2Fa to our phone
         if ((await page.$('#buttonContinue')) !== null) {
+            console.log('Trying to click???')
             await page.click('#buttonContinue')
+        }
+        else {
+            return;
         }
 
         await page.waitForNavigation({
@@ -173,19 +181,16 @@ async function login() {
             await page.click('#buttonVerifyIdentity');
             await page.waitForNavigation();
         }
-
         await delay(2000);
-
-        console.log('Log in: #' + loginTimes);
     }
     catch (e) {
         console.log(e);
     }
     finally {
+        console.timeEnd(`Login #${loginTimes}`);
         await page.close();
-
     }
-    console.timeEnd("goto");
+
 }
 
 function sendDiscord(op) {
