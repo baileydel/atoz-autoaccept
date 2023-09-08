@@ -10,9 +10,8 @@ dotenv.config();
 const user = process.env.USER_ID;
 const password = process.env.PASS;
 const employee_id = process.env.EMPLOYEE_ID
-
 const type = 'vto';
-const process_path = 'CYCLE_1';
+const ops_link = `https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=${employee_id}`;
 
 const browser = await puppeteer.launch({
     devtools: true,
@@ -25,77 +24,86 @@ const browser = await puppeteer.launch({
 });
 
 let loginTimes = 0;
+let loaded = false;
 
 (async () => {
-      let times = 0;
-      let last = [];
-      let ops = [];
+    let times = 0;
+    let last = [];
+    let ops = [];
 
-      const page = await browser.newPage();
+    const page = await browser.newPage();
 
-      while (true) {
-        if (page.url().includes(`https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=${employee_id}`)) {
-            page.reload({
-                waitUntil: "domcontentloaded",
-            }).then(() => {
-                times++;
+    while (true) {
+        let response = await page.goto(ops_link)
+        times++;
 
-                if (times % 50 == 0) {
-                    console.log(`Refresh #${times}`)
-                }
+        if (!loaded) {
+            console.log('******* LOADING *******')
+        }
+        
+        if (times % 50 == 0) {
+            console.log(`Refresh #${times}`)
+        }
 
-                page.$eval('*', (el) => el.innerText).then((text) => {
-                    if (text.length > 0 && text != undefined) {
-                        try {
-                            let json = JSON.parse(text)[`${type}Opportunities`];
+        response = await page.goto(ops_link, {
+            waitUntil: "domcontentloaded"
+        }).catch((err) => console.log("error loading url", err));
+        
 
-                            for (let i = 0; i < json.length; i++) {
-                                let op = json[i];
-    
-                                if (!last.includes(op['opportunity_id'])) {
-                                    last.push(op['opportunity_id']);
-    
-                                    if (op['workgroup'] == process_path && (op['active'])) {
-                                        ops.push(op);
-                                        sendDiscord(op);
-                                    }
-                                }
-                            }
-                        } catch(e) {console.log('Invalid Json')}
-                    }
-                }).catch(e => {console.log(e)});
-            }).catch(e => {console.log(e)});
+        if (!page.url().includes(ops_link)) {
+            await login(page);
+            continue;
         }
         else {
-            await login(page);
+            try {
+                let body = await response.json();
+                let json = body[`${type}Opportunities`];
+    
+                if (json != undefined) {
+                    for (let i = 0; i < json.length; i++) {
+                        let op = json[i];
+            
+                        if (!last.includes(op['opportunity_id'])) {
+                            last.push(op['opportunity_id']);
+                            
+                            console.log(getTime(op));
 
-            await page.goto(`https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=${employee_id}`, {
-                waitUntil: "domcontentloaded"
-            }).catch((err) => console.log("error loading url", err));
+                            if (op['active']) {
+                                ops.push(op);
+                                sendDiscord(op);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {}
         }
 
+        //Accept any vto
         for (let i = 0; i < ops.length; i++) {
             if (ops[i]['active']) {
                 console.log("Accepting VTO At Refresh #" + times);
                 await acceptVTO(ops[i]);
-                return;
             }
         }
+
+        if (!loaded) {
+            loaded = true;
+            console.log('******* LOADING END *******')
+        }
+
         await delay(4000);
     }
 })();
 
-async function acceptVTO(opportunity) {
+async function acceptVTO(op) {
+    const page2 = await browser.newPage();
     try {
         console.time('Accepting VTO: ')
 
-        const page2 = await browser.newPage();
-
         await Promise.all([
-            page2.goto(`https://atoz.amazon.work/time/optional/${opportunity['opportunity_id']}`, {
+            page2.goto(`https://atoz.amazon.work/time/optional/${op['opportunity_id']}`, {
                 waitUntil: "domcontentloaded",
-            })
-            .catch((err) => console.log("error loading url", err)),
+            }).catch((err) => console.log("error loading url", err)),
             
             page2.waitForSelector("#atoz-time-page-root > div.ess-client-app > div > div > div.center-block.centered-page.opportunity-detail > div > div.button-footer > div > button", { visible: true })
         ]);
@@ -108,12 +116,18 @@ async function acceptVTO(opportunity) {
 
         await delay(1000);
 
-        await page2.close();
-        console.timeEnd("Accepting VTO: ");
+        console.timeEnd('Accepting VTO: ');
     }
     catch(e) {
+        await page2.screenshot({
+            path: `./scrapingbee_homepage.jpg`
+        });
+
         console.log('Accepting VTO FAILED');
         console.log(e)
+    }
+    finally {
+        await page2.close();
     }
 }
 
@@ -194,18 +208,11 @@ async function login() {
 }
 
 function sendDiscord(op) {
-    let incent = '';
-    let timestamp1 = moment(op['start_time_local']);
-    let timestamp2 = moment(op['end_time_local']);
-
-    const duration = moment.duration(moment(timestamp2).diff(moment(timestamp1)));
-    const hours = Math.floor(duration.asHours());
-    const minutes = duration.minutes();
-    let time = `${timestamp1.format('dddd, MMM DD')}
-                ${timestamp1.format('HH:mm')} - ${timestamp2.format('HH:mm')} (${hours} hrs ${minutes} mins)`;
-
-
+    let time = getTime(op);
+    
     const color = op['active'] ? 5814783  : 0xFF0000;
+
+    let incent = '';
 
     if (op['is_opportunity_incentivized']) {
         incent = op['incentives']['incentive_value']
@@ -235,4 +242,15 @@ function sendDiscord(op) {
     .catch(reason => {
       console.err(reason)
     });
+}
+
+function getTime(op) {
+    let timestamp1 = moment(op['start_time_local']);
+    let timestamp2 = moment(op['end_time_local']);
+    
+    const duration = moment.duration(moment(timestamp2).diff(moment(timestamp1)));
+    const hours = Math.floor(duration.asHours());
+    const minutes = duration.minutes();
+    
+    return `${op['workgroup']}\n${timestamp1.format('dddd, MMM DD')}\n${timestamp1.format('HH:mm')} - ${timestamp2.format('HH:mm')} (${hours} hrs ${minutes} mins)`; 
 }
