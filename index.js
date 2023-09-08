@@ -14,13 +14,8 @@ const type = 'vto';
 const ops_link = `https://atoz.amazon.work/api/v1/opportunities/get_opportunities?employee_id=${employee_id}`;
 
 const browser = await puppeteer.launch({
-    devtools: true,
     userDataDir: './data',
-    defaultViewport: {
-      width: 1280,
-      height: 1024,
-    },
-    headless: false,
+    headless: true,
 });
 
 let loginTimes = 0;
@@ -30,36 +25,35 @@ let loaded = false;
     let times = 0;
     let last = [];
     let ops = [];
+    const accept = false;
 
     const page = await browser.newPage();
 
+    
     while (true) {
-        let response = await page.goto(ops_link)
-        times++;
-
-        if (!loaded) {
-            console.log('******* LOADING *******')
-        }
-        
-        if (times % 50 == 0) {
-            console.log(`Refresh #${times}`)
-        }
-
-        response = await page.goto(ops_link, {
-            waitUntil: "domcontentloaded"
-        }).catch((err) => console.log("error loading url", err));
-        
-
-        if (!page.url().includes(ops_link)) {
-            await login(page);
-            continue;
-        }
-        else {
+        try {
+            let response = await page.goto(ops_link)
+            times++;
+    
+            if (!loaded) {
+                console.log('******* LOADING *******')
+            }
+            
+            if (times % 50 == 0) {
+                console.log(`Refresh #${times}`)
+            }
+    
+            if (!page.url().includes(ops_link)) {
+                await login(page);
+                continue;
+            }
+            
             try {
                 let body = await response.json();
                 let json = body[`${type}Opportunities`];
     
                 if (json != undefined) {
+                    ops = [];
                     for (let i = 0; i < json.length; i++) {
                         let op = json[i];
             
@@ -76,58 +70,64 @@ let loaded = false;
                     }
                 }
             } catch (e) {}
-        }
-
-        //Accept any vto
-        for (let i = 0; i < ops.length; i++) {
-            if (ops[i]['active']) {
-                console.log("Accepting VTO At Refresh #" + times);
-                await acceptVTO(ops[i]);
+    
+            if (accept && ops.length > 0) {
+                await acceptVTO();
             }
+    
+            if (!loaded) {
+                loaded = true;
+                console.log('******* LOADING END *******')
+            }
+            await delay(4000);
         }
-
-        if (!loaded) {
-            loaded = true;
-            console.log('******* LOADING END *******')
+        catch(e) {
+            console.log(e);
         }
-
-        await delay(4000);
     }
 })();
 
-async function acceptVTO(op) {
-    const page2 = await browser.newPage();
+async function acceptVTO() {
+    const page = await browser.newPage();
     try {
-        console.time('Accepting VTO: ')
-
-        await Promise.all([
-            page2.goto(`https://atoz.amazon.work/time/optional/${op['opportunity_id']}`, {
-                waitUntil: "domcontentloaded",
-            }).catch((err) => console.log("error loading url", err)),
-            
-            page2.waitForSelector("#atoz-time-page-root > div.ess-client-app > div > div > div.center-block.centered-page.opportunity-detail > div > div.button-footer > div > button", { visible: true })
-        ]);
-
-        await page2.click('#atoz-time-page-root > div.ess-client-app > div > div > div.center-block.centered-page.opportunity-detail > div > div.button-footer > div > button')
-        
-        await delay(500);
-        
-        await page2.click('body > div:nth-child(13) > div.fade.in.modal > div > div > div.modal-body > div > div > button.btn.btn-primary.btn-half-block');
-
+        console.time('Accepting VTO: ');
+    
+        await page.goto('https://atoz.amazon.work/voluntary_time_off');
         await delay(1000);
+
+        const linkHandlers = await page.$x("//button[contains(., 'Accept')]");
+    
+        if (linkHandlers.length > 0) {
+            await linkHandlers[0].click();
+            console.log('found')
+
+
+            await delay(300);
+
+            const linkHandlers2 =  await page.$x("//button[contains(., 'Accept VTO')]");
+
+            if (linkHandlers2.length > 0) {
+                console.log('able to accept')
+                console.log(linkHandlers2);
+                await linkHandlers2[0].click();
+            }
+        } 
+  
+        await page.screenshot({
+            path: `./scrapingbee_homepage.jpg`
+        });
 
         console.timeEnd('Accepting VTO: ');
     }
     catch(e) {
-        await page2.screenshot({
-            path: `./scrapingbee_homepage.jpg`
-        });
-
         console.log('Accepting VTO FAILED');
-        console.log(e)
+        console.log(e);
     }
     finally {
-        await page2.close();
+        await page.screenshot({
+            path: `./scrapingbee_homepage.jpg`
+        });
+        await page.close();
     }
 }
 
@@ -230,9 +230,7 @@ function sendDiscord(op) {
             "title": `${op['opportunity_type']} Opportunity`,
             "url": `https://atoz.amazon.work/time/optional/${op['opportunity_id']}`,
             "description": `${time}
-                            ${incent}
-                            ${op['inactive_reason']}
-                            ${op['workgroup']}`,
+                            ${incent}`,
             "color": color
           }
         ],
